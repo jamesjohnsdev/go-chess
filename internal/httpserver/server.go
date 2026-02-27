@@ -1,6 +1,7 @@
-// Package httpserver wires up the HTTP handlers for the web version of the
-// game: static assets and a Huma-documented API now, live-game and chat
-// endpoints (likely WebSocket) once internal/game grows session management.
+// Package httpserver wires up the Huma-documented API for go-chess: health
+// check now, live-game and chat endpoints (likely WebSocket) once
+// internal/game grows session management. The frontend is a separate app
+// that talks to this API.
 package httpserver
 
 import (
@@ -18,7 +19,6 @@ func New() http.Handler {
 
 	registerHealthz(api)
 
-	router.Handle("/*", http.FileServer(http.Dir("web/static")))
 	return router
 }
 

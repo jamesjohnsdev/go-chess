@@ -28,6 +28,11 @@ var pieceLetters = map[PieceType]string{
 	King:   "k",
 }
 
+// Letter returns the lowercase algebraic letter for t, or "" for None.
+func (t PieceType) Letter() string {
+	return pieceLetters[t]
+}
+
 func (p Piece) String() string {
 	letter, ok := pieceLetters[p.Type]
 	if !ok {

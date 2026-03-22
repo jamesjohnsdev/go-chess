@@ -57,7 +57,7 @@ func main() {
 			return
 		}
 
-		m, err := parseMove(input)
+		m, err := engine.ParseMove(input)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -80,40 +80,6 @@ func isComputerTurn(turn engine.Color, computer string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func parseMove(input string) (engine.Move, error) {
-	if len(input) < 4 {
-		return engine.Move{}, fmt.Errorf("expected a move like e2e4")
-	}
-	from, err := engine.ParseSquare(input[0:2])
-	if err != nil {
-		return engine.Move{}, err
-	}
-	to, err := engine.ParseSquare(input[2:4])
-	if err != nil {
-		return engine.Move{}, err
-	}
-	m := engine.Move{From: from, To: to}
-	if len(input) >= 5 {
-		m.Promotion = promotionFromLetter(input[4])
-	}
-	return m, nil
-}
-
-func promotionFromLetter(c byte) engine.PieceType {
-	switch c {
-	case 'q':
-		return engine.Queen
-	case 'r':
-		return engine.Rook
-	case 'b':
-		return engine.Bishop
-	case 'n':
-		return engine.Knight
-	default:
-		return engine.None
 	}
 }
 

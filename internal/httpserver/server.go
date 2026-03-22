@@ -11,13 +11,19 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jamesjohnsdev/go-chess/internal/game"
 )
 
 func New() http.Handler {
 	router := chi.NewMux()
 	api := huma.NewAPI(huma.DefaultConfig("go-chess", "0.1.0"), humachi.NewAdapter(router))
+	store := game.NewStore()
 
 	registerHealthz(api)
+	registerCreateGame(api, store)
+	registerGetGame(api, store)
+	registerGameSocket(router, store)
 
 	return router
 }

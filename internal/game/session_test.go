@@ -100,6 +100,71 @@ func TestAddChatBroadcasts(t *testing.T) {
 	}
 }
 
+func TestMakeMoveRejectedAfterCheckmate(t *testing.T) {
+	s := newSession("test")
+	moves := []struct {
+		color engine.Color
+		uci   string
+	}{
+		{engine.White, "f2f3"},
+		{engine.Black, "e7e5"},
+		{engine.White, "g2g4"},
+		{engine.Black, "d8h4"},
+	}
+	for _, mv := range moves {
+		m, err := engine.ParseMove(mv.uci)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.MakeMove(mv.color, m); err != nil {
+			t.Fatalf("MakeMove(%s): %v", mv.uci, err)
+		}
+	}
+
+	if !s.State().Checkmate {
+		t.Fatal("expected checkmate after fool's mate")
+	}
+
+	m, _ := engine.ParseMove("g1f3")
+	if err := s.MakeMove(engine.White, m); !errors.Is(err, ErrGameOver) {
+		t.Errorf("MakeMove after checkmate = %v, want ErrGameOver", err)
+	}
+}
+
+func TestMakeMoveRejectedAfterThreefoldRepetition(t *testing.T) {
+	s := newSession("test")
+	shuffle := []struct {
+		color engine.Color
+		uci   string
+	}{
+		{engine.White, "g1f3"},
+		{engine.Black, "g8f6"},
+		{engine.White, "f3g1"},
+		{engine.Black, "f6g8"},
+	}
+	for rep := 0; rep < 2; rep++ {
+		for _, mv := range shuffle {
+			m, err := engine.ParseMove(mv.uci)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.MakeMove(mv.color, m); err != nil {
+				t.Fatalf("MakeMove(%s): %v", mv.uci, err)
+			}
+		}
+	}
+
+	state := s.State()
+	if !state.Draw || state.DrawReason != "threefold repetition" {
+		t.Fatalf("State() = %+v, want draw by threefold repetition", state)
+	}
+
+	m, _ := engine.ParseMove("b1c3")
+	if err := s.MakeMove(engine.White, m); !errors.Is(err, ErrGameOver) {
+		t.Errorf("MakeMove after threefold repetition = %v, want ErrGameOver", err)
+	}
+}
+
 func TestCancelUnsubscribes(t *testing.T) {
 	s := newSession("test")
 	events, cancel := s.Subscribe()

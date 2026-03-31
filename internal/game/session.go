@@ -14,6 +14,7 @@ var (
 	ErrNotYourTurn  = errors.New("not your turn")
 	ErrIllegalMove  = errors.New("illegal move")
 	ErrInvalidToken = errors.New("invalid token")
+	ErrGameOver     = errors.New("game is already over")
 )
 
 type ChatMessage struct {
@@ -46,12 +47,18 @@ type ClientMessage struct {
 
 // State is a snapshot of a game, safe to serialize and send to clients.
 type State struct {
-	Turn      string        `json:"turn"`
-	Board     string        `json:"board"`
-	Check     bool          `json:"check"`
-	Checkmate bool          `json:"checkmate"`
-	Stalemate bool          `json:"stalemate"`
-	Chat      []ChatMessage `json:"chat"`
+	Turn       string        `json:"turn"`
+	Board      string        `json:"board"`
+	Check      bool          `json:"check"`
+	Checkmate  bool          `json:"checkmate"`
+	Stalemate  bool          `json:"stalemate"`
+	Draw       bool          `json:"draw"`
+	DrawReason string        `json:"draw_reason,omitempty"`
+	Chat       []ChatMessage `json:"chat"`
+}
+
+func (s State) Over() bool {
+	return s.Checkmate || s.Stalemate || s.Draw
 }
 
 // Event is broadcast to every subscriber whenever a game changes.
@@ -76,15 +83,18 @@ type Session struct {
 	chat       []ChatMessage
 	subs       map[int]chan Event
 	nextSub    int
+	positions  map[string]int
 }
 
 func newSession(id string) *Session {
+	board := engine.NewBoard()
 	return &Session{
 		ID:         id,
-		board:      engine.NewBoard(),
+		board:      board,
 		whiteToken: randomID(16),
 		blackToken: randomID(16),
 		subs:       make(map[int]chan Event),
+		positions:  map[string]int{board.PositionKey(): 1},
 	}
 }
 
@@ -111,13 +121,31 @@ func (s *Session) State() State {
 }
 
 func (s *Session) stateLocked() State {
+	draw, reason := s.drawStatusLocked()
 	return State{
-		Turn:      s.board.Turn().String(),
-		Board:     s.board.String(),
-		Check:     s.board.InCheck(),
-		Checkmate: s.board.IsCheckmate(),
-		Stalemate: s.board.IsStalemate(),
-		Chat:      append([]ChatMessage(nil), s.chat...),
+		Turn:       s.board.Turn().String(),
+		Board:      s.board.String(),
+		Check:      s.board.InCheck(),
+		Checkmate:  s.board.IsCheckmate(),
+		Stalemate:  s.board.IsStalemate(),
+		Draw:       draw,
+		DrawReason: reason,
+		Chat:       append([]ChatMessage(nil), s.chat...),
+	}
+}
+
+// drawStatusLocked reports draws other than stalemate, which State already
+// surfaces via its own field.
+func (s *Session) drawStatusLocked() (bool, string) {
+	switch {
+	case s.board.IsFiftyMoveDraw():
+		return true, "fifty-move rule"
+	case s.board.IsInsufficientMaterial():
+		return true, "insufficient material"
+	case s.positions[s.board.PositionKey()] >= 3:
+		return true, "threefold repetition"
+	default:
+		return false, ""
 	}
 }
 
@@ -127,6 +155,12 @@ func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.board.IsCheckmate() || s.board.IsStalemate() {
+		return ErrGameOver
+	}
+	if draw, _ := s.drawStatusLocked(); draw {
+		return ErrGameOver
+	}
 	if s.board.Turn() != color {
 		return ErrNotYourTurn
 	}
@@ -142,6 +176,7 @@ func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 	}
 
 	s.board.MakeMove(m)
+	s.positions[s.board.PositionKey()]++
 	msg := moveToMsg(m)
 	s.broadcastLocked(Event{Type: "move", Move: &msg, State: s.stateLocked()})
 	return nil

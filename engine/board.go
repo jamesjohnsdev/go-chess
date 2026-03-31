@@ -16,13 +16,14 @@ type CastlingRights struct {
 }
 
 // Board is an 8x8 piece grid plus the state needed for legal move
-// generation: side to move, castling rights, and the en passant target
-// square.
+// generation and draw detection: side to move, castling rights, the en
+// passant target square, and the fifty-move-rule halfmove clock.
 type Board struct {
 	squares  [8][8]Piece
 	turn     Color
 	castling CastlingRights
 	epTarget Square
+	halfmove int
 }
 
 func NewBoard() *Board {
@@ -75,6 +76,7 @@ func (b *Board) EnPassant() (Square, bool) {
 func (b *Board) MakeMove(m Move) {
 	p := b.At(m.From)
 	mover := p
+	isCapture := b.At(m.To).Type != None || (p.Type == Pawn && m.To == b.epTarget)
 
 	if p.Type == Pawn && m.To == b.epTarget {
 		b.Set(Square{File: m.To.File, Rank: m.From.Rank}, Piece{})
@@ -103,6 +105,12 @@ func (b *Board) MakeMove(m Move) {
 		b.epTarget = Square{File: m.From.File, Rank: (m.From.Rank + m.To.Rank) / 2}
 	} else {
 		b.epTarget = noEnPassant
+	}
+
+	if mover.Type == Pawn || isCapture {
+		b.halfmove = 0
+	} else {
+		b.halfmove++
 	}
 
 	b.turn = b.turn.Opponent()

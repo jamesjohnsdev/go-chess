@@ -20,6 +20,7 @@ func main() {
 	b := engine.NewBoard()
 	bot := ai.New()
 	scanner := bufio.NewScanner(os.Stdin)
+	positions := map[string]int{b.PositionKey(): 1}
 
 	for {
 		fmt.Print(b)
@@ -29,7 +30,19 @@ func main() {
 			return
 		}
 		if b.IsStalemate() {
-			fmt.Println("stalemate")
+			fmt.Println("draw by stalemate")
+			return
+		}
+		if b.IsFiftyMoveDraw() {
+			fmt.Println("draw by fifty-move rule")
+			return
+		}
+		if b.IsInsufficientMaterial() {
+			fmt.Println("draw by insufficient material")
+			return
+		}
+		if positions[b.PositionKey()] >= 3 {
+			fmt.Println("draw by threefold repetition")
 			return
 		}
 		status := ""
@@ -45,6 +58,7 @@ func main() {
 			}
 			fmt.Printf("%s to move%s: computer plays %s\n", b.Turn(), status, move)
 			b.MakeMove(move)
+			positions[b.PositionKey()]++
 			continue
 		}
 
@@ -67,6 +81,7 @@ func main() {
 			continue
 		}
 		b.MakeMove(m)
+		positions[b.PositionKey()]++
 	}
 }
 

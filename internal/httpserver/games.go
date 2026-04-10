@@ -9,14 +9,22 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/jamesjohnsdev/go-chess/engine"
 	"github.com/jamesjohnsdev/go-chess/internal/game"
 )
+
+type CreateGameInput struct {
+	Body struct {
+		Computer string `json:"computer,omitempty" enum:"white,black,none" default:"none" doc:"which side the computer plays; \"none\" (the default) for two human players"`
+	}
+}
 
 type CreateGameOutput struct {
 	Body struct {
 		ID         string `json:"id"`
-		WhiteToken string `json:"white_token"`
-		BlackToken string `json:"black_token"`
+		WhiteToken string `json:"white_token,omitempty" doc:"omitted if the computer plays white"`
+		BlackToken string `json:"black_token,omitempty" doc:"omitted if the computer plays black"`
+		Computer   string `json:"computer,omitempty" doc:"which side the computer plays, if any"`
 	}
 }
 
@@ -26,11 +34,24 @@ func registerCreateGame(api huma.API, store *game.Store) {
 		Method:      http.MethodPost,
 		Path:        "/games",
 		Summary:     "Create a new live game",
-	}, func(ctx context.Context, input *struct{}) (*CreateGameOutput, error) {
-		s := store.Create()
+	}, func(ctx context.Context, input *CreateGameInput) (*CreateGameOutput, error) {
 		out := &CreateGameOutput{}
-		out.Body.ID = s.ID
-		out.Body.WhiteToken, out.Body.BlackToken = s.Tokens()
+		switch input.Body.Computer {
+		case "white":
+			s := store.CreateVsComputer(engine.White)
+			out.Body.ID = s.ID
+			_, out.Body.BlackToken = s.Tokens()
+			out.Body.Computer = "white"
+		case "black":
+			s := store.CreateVsComputer(engine.Black)
+			out.Body.ID = s.ID
+			out.Body.WhiteToken, _ = s.Tokens()
+			out.Body.Computer = "black"
+		default:
+			s := store.Create()
+			out.Body.ID = s.ID
+			out.Body.WhiteToken, out.Body.BlackToken = s.Tokens()
+		}
 		return out, nil
 	})
 }

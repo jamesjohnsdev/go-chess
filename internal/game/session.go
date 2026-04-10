@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/jamesjohnsdev/go-chess/engine"
+	"github.com/jamesjohnsdev/go-chess/engine/ai"
 )
 
 var (
@@ -84,6 +85,13 @@ type Session struct {
 	subs       map[int]chan Event
 	nextSub    int
 	positions  map[string]int
+
+	// hasComputer, computer, and bot are unset for a two-human game. When
+	// set, MakeMove auto-plays the computer's replies and never accepts a
+	// move for its color from a client.
+	hasComputer bool
+	computer    engine.Color
+	bot         *ai.Engine
 }
 
 func newSession(id string) *Session {
@@ -96,6 +104,18 @@ func newSession(id string) *Session {
 		subs:       make(map[int]chan Event),
 		positions:  map[string]int{board.PositionKey(): 1},
 	}
+}
+
+// newComputerSession creates a game where computerColor is played by the
+// built-in AI. If the computer plays White, it makes the opening move
+// immediately.
+func newComputerSession(id string, computerColor engine.Color) *Session {
+	s := newSession(id)
+	s.hasComputer = true
+	s.computer = computerColor
+	s.bot = ai.New()
+	s.autoPlayComputerLocked()
+	return s
 }
 
 // Tokens returns the bearer tokens a client uses to play as white or black.
@@ -161,7 +181,7 @@ func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 	if draw, _ := s.drawStatusLocked(); draw {
 		return ErrGameOver
 	}
-	if s.board.Turn() != color {
+	if s.board.Turn() != color || (s.hasComputer && color == s.computer) {
 		return ErrNotYourTurn
 	}
 	legal := false
@@ -179,7 +199,31 @@ func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 	s.positions[s.board.PositionKey()]++
 	msg := moveToMsg(m)
 	s.broadcastLocked(Event{Type: "move", Move: &msg, State: s.stateLocked()})
+
+	s.autoPlayComputerLocked()
 	return nil
+}
+
+// autoPlayComputerLocked plays the computer's move if it's to move and the
+// game isn't over. It's a loop only for safety; in practice it runs once,
+// since a move always hands the turn back to the human.
+func (s *Session) autoPlayComputerLocked() {
+	for s.hasComputer && s.board.Turn() == s.computer {
+		if s.board.IsCheckmate() || s.board.IsStalemate() {
+			return
+		}
+		if draw, _ := s.drawStatusLocked(); draw {
+			return
+		}
+		move, ok := s.bot.BestMove(s.board)
+		if !ok {
+			return
+		}
+		s.board.MakeMove(move)
+		s.positions[s.board.PositionKey()]++
+		msg := moveToMsg(move)
+		s.broadcastLocked(Event{Type: "move", Move: &msg, State: s.stateLocked()})
+	}
 }
 
 // AddChat appends a chat message and broadcasts it to all subscribers.

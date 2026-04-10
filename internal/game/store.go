@@ -1,6 +1,10 @@
 package game
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/jamesjohnsdev/go-chess/engine"
+)
 
 // Store holds every in-flight Session, keyed by ID. It's an in-memory store:
 // games are lost on restart, which is fine until go-chess needs persistence.
@@ -18,6 +22,17 @@ func (st *Store) Create() *Session {
 	defer st.mu.Unlock()
 
 	s := newSession(randomID(8))
+	st.sessions[s.ID] = s
+	return s
+}
+
+// CreateVsComputer creates a game where computerColor is played by the
+// built-in AI opponent.
+func (st *Store) CreateVsComputer(computerColor engine.Color) *Session {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	s := newComputerSession(randomID(8), computerColor)
 	st.sessions[s.ID] = s
 	return s
 }

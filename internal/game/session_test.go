@@ -165,6 +165,59 @@ func TestMakeMoveRejectedAfterThreefoldRepetition(t *testing.T) {
 	}
 }
 
+func TestComputerBlackAutoRepliesToHumanMove(t *testing.T) {
+	s := newComputerSession("test", engine.Black)
+
+	if got := s.State().Turn; got != "white" {
+		t.Fatalf("Turn() right after creation = %q, want white (computer shouldn't move first)", got)
+	}
+
+	m, _ := engine.ParseMove("e2e4")
+	if err := s.MakeMove(engine.White, m); err != nil {
+		t.Fatalf("MakeMove(e2e4): %v", err)
+	}
+
+	state := s.State()
+	if state.Turn != "white" {
+		t.Errorf("Turn() after computer's reply = %q, want white", state.Turn)
+	}
+	if state.Board == engine.NewBoard().String() {
+		t.Error("board unchanged after human + computer moves")
+	}
+}
+
+func TestComputerWhiteMovesFirst(t *testing.T) {
+	s := newComputerSession("test", engine.White)
+
+	state := s.State()
+	if state.Turn != "black" {
+		t.Fatalf("Turn() right after creation = %q, want black (computer should have moved)", state.Turn)
+	}
+	if state.Board == engine.NewBoard().String() {
+		t.Error("board unchanged; computer should have made the opening move")
+	}
+}
+
+func TestMakeMoveRejectsComputersColor(t *testing.T) {
+	s := newComputerSession("test", engine.Black)
+	m, _ := engine.ParseMove("e7e5")
+	if err := s.MakeMove(engine.Black, m); !errors.Is(err, ErrNotYourTurn) {
+		t.Errorf("MakeMove as the computer's color = %v, want ErrNotYourTurn", err)
+	}
+}
+
+func TestCreateVsComputerOnlyIssuesHumanToken(t *testing.T) {
+	store := NewStore()
+	s := store.CreateVsComputer(engine.Black)
+	white, black := s.Tokens()
+	if white == "" {
+		t.Error("human (white) token should be set")
+	}
+	if black == "" {
+		t.Error("computer (black) token should still be generated internally, just never handed out by the API layer")
+	}
+}
+
 func TestCancelUnsubscribes(t *testing.T) {
 	s := newSession("test")
 	events, cancel := s.Subscribe()

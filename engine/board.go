@@ -24,6 +24,7 @@ type Board struct {
 	castling CastlingRights
 	epTarget Square
 	halfmove int
+	fullmove int
 }
 
 func NewBoard() *Board {
@@ -41,7 +42,7 @@ func NewBoard() *Board {
 // NewEmptyBoard returns a board with no pieces, White to move, no castling
 // rights, and no en passant target. Useful for constructing test positions.
 func NewEmptyBoard() *Board {
-	return &Board{turn: White, epTarget: noEnPassant}
+	return &Board{turn: White, epTarget: noEnPassant, fullmove: 1}
 }
 
 func (b *Board) At(sq Square) Piece {
@@ -54,6 +55,12 @@ func (b *Board) Set(sq Square, p Piece) {
 
 func (b *Board) Turn() Color {
 	return b.turn
+}
+
+// FullmoveNumber starts at 1 and increments after each Black move, per FEN
+// convention.
+func (b *Board) FullmoveNumber() int {
+	return b.fullmove
 }
 
 func (b *Board) Castling() CastlingRights {
@@ -113,6 +120,9 @@ func (b *Board) MakeMove(m Move) {
 		b.halfmove++
 	}
 
+	if b.turn == Black {
+		b.fullmove++
+	}
 	b.turn = b.turn.Opponent()
 }
 

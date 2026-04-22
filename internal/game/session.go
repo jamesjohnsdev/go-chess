@@ -50,6 +50,7 @@ type ClientMessage struct {
 type State struct {
 	Turn       string        `json:"turn"`
 	Board      string        `json:"board"`
+	FEN        string        `json:"fen"`
 	Check      bool          `json:"check"`
 	Checkmate  bool          `json:"checkmate"`
 	Stalemate  bool          `json:"stalemate"`
@@ -145,6 +146,7 @@ func (s *Session) stateLocked() State {
 	return State{
 		Turn:       s.board.Turn().String(),
 		Board:      s.board.String(),
+		FEN:        s.board.FEN(),
 		Check:      s.board.InCheck(),
 		Checkmate:  s.board.IsCheckmate(),
 		Stalemate:  s.board.IsStalemate(),

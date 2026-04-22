@@ -15,9 +15,18 @@ import (
 
 func main() {
 	computer := flag.String("computer", "black", `which side the computer plays: "white", "black", "both", or "none"`)
+	fen := flag.String("fen", "", "starting position in FEN notation (default: the standard start)")
 	flag.Parse()
 
 	b := engine.NewBoard()
+	if *fen != "" {
+		var err error
+		b, err = engine.ParseFEN(*fen)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}
 	bot := ai.New()
 	scanner := bufio.NewScanner(os.Stdin)
 	positions := map[string]int{b.PositionKey(): 1}
@@ -62,13 +71,17 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("%s to move%s (uci, e.g. e2e4, or 'quit'): ", b.Turn(), status)
+		fmt.Printf("%s to move%s (uci, e.g. e2e4, 'fen', or 'quit'): ", b.Turn(), status)
 		if !scanner.Scan() {
 			return
 		}
 		input := strings.TrimSpace(scanner.Text())
 		if input == "quit" {
 			return
+		}
+		if input == "fen" {
+			fmt.Println(b.FEN())
+			continue
 		}
 
 		m, err := engine.ParseMove(input)

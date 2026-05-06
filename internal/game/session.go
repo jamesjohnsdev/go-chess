@@ -16,6 +16,8 @@ var (
 	ErrIllegalMove  = errors.New("illegal move")
 	ErrInvalidToken = errors.New("invalid token")
 	ErrGameOver     = errors.New("game is already over")
+	ErrNoDrawOffer  = errors.New("no draw offer to respond to")
+	ErrOwnDrawOffer = errors.New("cannot accept your own draw offer")
 )
 
 type ChatMessage struct {
@@ -41,26 +43,30 @@ func moveToMsg(m engine.Move) MoveMsg {
 
 // ClientMessage is a message sent by a connected player over WebSocket.
 type ClientMessage struct {
-	Type string   `json:"type"` // "move" or "chat"
+	Type string   `json:"type"` // "move", "chat", "resign", "offer_draw", "accept_draw", or "decline_draw"
 	Move *MoveMsg `json:"move,omitempty"`
 	Text string   `json:"text,omitempty"`
 }
 
 // State is a snapshot of a game, safe to serialize and send to clients.
 type State struct {
-	Turn       string        `json:"turn"`
-	Board      string        `json:"board"`
-	FEN        string        `json:"fen"`
-	Check      bool          `json:"check"`
-	Checkmate  bool          `json:"checkmate"`
-	Stalemate  bool          `json:"stalemate"`
-	Draw       bool          `json:"draw"`
-	DrawReason string        `json:"draw_reason,omitempty"`
-	Chat       []ChatMessage `json:"chat"`
+	Turn          string        `json:"turn"`
+	Board         string        `json:"board"`
+	FEN           string        `json:"fen"`
+	Check         bool          `json:"check"`
+	Checkmate     bool          `json:"checkmate"`
+	Stalemate     bool          `json:"stalemate"`
+	Resigned      bool          `json:"resigned"`
+	Winner        string        `json:"winner,omitempty"`
+	Draw          bool          `json:"draw"`
+	DrawReason    string        `json:"draw_reason,omitempty"`
+	DrawOffered   bool          `json:"draw_offered"`
+	DrawOfferedBy string        `json:"draw_offered_by,omitempty"`
+	Chat          []ChatMessage `json:"chat"`
 }
 
 func (s State) Over() bool {
-	return s.Checkmate || s.Stalemate || s.Draw
+	return s.Checkmate || s.Stalemate || s.Draw || s.Resigned
 }
 
 // Event is broadcast to every subscriber whenever a game changes.
@@ -86,6 +92,12 @@ type Session struct {
 	subs       map[int]chan Event
 	nextSub    int
 	positions  map[string]int
+
+	resigned      bool
+	resignedBy    engine.Color
+	drawAgreed    bool
+	drawOffered   bool
+	drawOfferedBy engine.Color
 
 	// hasComputer, computer, and bot are unset for a two-human game. When
 	// set, MakeMove auto-plays the computer's replies and never accepts a
@@ -143,16 +155,35 @@ func (s *Session) State() State {
 
 func (s *Session) stateLocked() State {
 	draw, reason := s.drawStatusLocked()
+	checkmate := s.board.IsCheckmate()
+
+	winner := ""
+	switch {
+	case checkmate:
+		winner = s.board.Turn().Opponent().String()
+	case s.resigned:
+		winner = s.resignedBy.Opponent().String()
+	}
+
+	drawOfferedBy := ""
+	if s.drawOffered {
+		drawOfferedBy = s.drawOfferedBy.String()
+	}
+
 	return State{
-		Turn:       s.board.Turn().String(),
-		Board:      s.board.String(),
-		FEN:        s.board.FEN(),
-		Check:      s.board.InCheck(),
-		Checkmate:  s.board.IsCheckmate(),
-		Stalemate:  s.board.IsStalemate(),
-		Draw:       draw,
-		DrawReason: reason,
-		Chat:       append([]ChatMessage(nil), s.chat...),
+		Turn:          s.board.Turn().String(),
+		Board:         s.board.String(),
+		FEN:           s.board.FEN(),
+		Check:         s.board.InCheck(),
+		Checkmate:     checkmate,
+		Stalemate:     s.board.IsStalemate(),
+		Resigned:      s.resigned,
+		Winner:        winner,
+		Draw:          draw,
+		DrawReason:    reason,
+		DrawOffered:   s.drawOffered,
+		DrawOfferedBy: drawOfferedBy,
+		Chat:          append([]ChatMessage(nil), s.chat...),
 	}
 }
 
@@ -160,6 +191,8 @@ func (s *Session) stateLocked() State {
 // surfaces via its own field.
 func (s *Session) drawStatusLocked() (bool, string) {
 	switch {
+	case s.drawAgreed:
+		return true, "agreement"
 	case s.board.IsFiftyMoveDraw():
 		return true, "fifty-move rule"
 	case s.board.IsInsufficientMaterial():
@@ -171,16 +204,21 @@ func (s *Session) drawStatusLocked() (bool, string) {
 	}
 }
 
+func (s *Session) gameOverLocked() bool {
+	if s.resigned || s.board.IsCheckmate() || s.board.IsStalemate() {
+		return true
+	}
+	draw, _ := s.drawStatusLocked()
+	return draw
+}
+
 // MakeMove applies m as color's move if it's their turn and the move is
 // legal, then broadcasts the resulting state to all subscribers.
 func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.board.IsCheckmate() || s.board.IsStalemate() {
-		return ErrGameOver
-	}
-	if draw, _ := s.drawStatusLocked(); draw {
+	if s.gameOverLocked() {
 		return ErrGameOver
 	}
 	if s.board.Turn() != color || (s.hasComputer && color == s.computer) {
@@ -199,10 +237,84 @@ func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 
 	s.board.MakeMove(m)
 	s.positions[s.board.PositionKey()]++
+	s.drawOffered = false
 	msg := moveToMsg(m)
 	s.broadcastLocked(Event{Type: "move", Move: &msg, State: s.stateLocked()})
 
 	s.autoPlayComputerLocked()
+	return nil
+}
+
+// Resign ends the game immediately with the other color as winner.
+func (s *Session) Resign(color engine.Color) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.gameOverLocked() {
+		return ErrGameOver
+	}
+	if s.hasComputer && color == s.computer {
+		return ErrNotYourTurn
+	}
+
+	s.resigned = true
+	s.resignedBy = color
+	s.drawOffered = false
+	s.broadcastLocked(Event{Type: "resign", State: s.stateLocked()})
+	return nil
+}
+
+// OfferDraw records color's offer to draw, visible to subscribers via
+// State.DrawOffered until it's accepted, declined, or a move is made.
+func (s *Session) OfferDraw(color engine.Color) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.gameOverLocked() {
+		return ErrGameOver
+	}
+	if s.hasComputer && color == s.computer {
+		return ErrNotYourTurn
+	}
+
+	s.drawOffered = true
+	s.drawOfferedBy = color
+	s.broadcastLocked(Event{Type: "draw_offer", State: s.stateLocked()})
+	return nil
+}
+
+// AcceptDraw ends the game as a draw by agreement. color must be the player
+// who did not make the pending offer.
+func (s *Session) AcceptDraw(color engine.Color) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.gameOverLocked() {
+		return ErrGameOver
+	}
+	if !s.drawOffered {
+		return ErrNoDrawOffer
+	}
+	if color == s.drawOfferedBy {
+		return ErrOwnDrawOffer
+	}
+
+	s.drawAgreed = true
+	s.broadcastLocked(Event{Type: "draw", State: s.stateLocked()})
+	return nil
+}
+
+// DeclineDraw clears the pending draw offer; the game continues.
+func (s *Session) DeclineDraw(color engine.Color) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.drawOffered {
+		return ErrNoDrawOffer
+	}
+
+	s.drawOffered = false
+	s.broadcastLocked(Event{Type: "draw_decline", State: s.stateLocked()})
 	return nil
 }
 
@@ -211,10 +323,7 @@ func (s *Session) MakeMove(color engine.Color, m engine.Move) error {
 // since a move always hands the turn back to the human.
 func (s *Session) autoPlayComputerLocked() {
 	for s.hasComputer && s.board.Turn() == s.computer {
-		if s.board.IsCheckmate() || s.board.IsStalemate() {
-			return
-		}
-		if draw, _ := s.drawStatusLocked(); draw {
+		if s.gameOverLocked() {
 			return
 		}
 		move, ok := s.bot.BestMove(s.board)

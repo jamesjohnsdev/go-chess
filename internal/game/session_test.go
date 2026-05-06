@@ -218,6 +218,103 @@ func TestCreateVsComputerOnlyIssuesHumanToken(t *testing.T) {
 	}
 }
 
+func TestResign(t *testing.T) {
+	s := newSession("test")
+	if err := s.Resign(engine.White); err != nil {
+		t.Fatalf("Resign(White): %v", err)
+	}
+
+	state := s.State()
+	if !state.Resigned || state.Winner != "black" {
+		t.Errorf("State() = %+v, want resigned with black as winner", state)
+	}
+	if !state.Over() {
+		t.Error("State().Over() = false after resignation, want true")
+	}
+
+	m, _ := engine.ParseMove("e2e4")
+	if err := s.MakeMove(engine.White, m); !errors.Is(err, ErrGameOver) {
+		t.Errorf("MakeMove after resignation = %v, want ErrGameOver", err)
+	}
+	if err := s.Resign(engine.Black); !errors.Is(err, ErrGameOver) {
+		t.Errorf("Resign after game over = %v, want ErrGameOver", err)
+	}
+}
+
+func TestResignRejectedForComputerColor(t *testing.T) {
+	s := newComputerSession("test", engine.Black)
+	if err := s.Resign(engine.Black); !errors.Is(err, ErrNotYourTurn) {
+		t.Errorf("Resign as the computer's color = %v, want ErrNotYourTurn", err)
+	}
+}
+
+func TestOfferAndAcceptDraw(t *testing.T) {
+	s := newSession("test")
+	if err := s.OfferDraw(engine.White); err != nil {
+		t.Fatalf("OfferDraw(White): %v", err)
+	}
+
+	state := s.State()
+	if !state.DrawOffered || state.DrawOfferedBy != "white" {
+		t.Fatalf("State() = %+v, want a pending offer from white", state)
+	}
+
+	if err := s.AcceptDraw(engine.White); !errors.Is(err, ErrOwnDrawOffer) {
+		t.Errorf("AcceptDraw by the offering side = %v, want ErrOwnDrawOffer", err)
+	}
+
+	if err := s.AcceptDraw(engine.Black); err != nil {
+		t.Fatalf("AcceptDraw(Black): %v", err)
+	}
+	state = s.State()
+	if !state.Draw || state.DrawReason != "agreement" {
+		t.Errorf("State() after accept = %+v, want draw by agreement", state)
+	}
+}
+
+func TestAcceptDrawWithNoOffer(t *testing.T) {
+	s := newSession("test")
+	if err := s.AcceptDraw(engine.Black); !errors.Is(err, ErrNoDrawOffer) {
+		t.Errorf("AcceptDraw with no offer = %v, want ErrNoDrawOffer", err)
+	}
+}
+
+func TestDeclineDraw(t *testing.T) {
+	s := newSession("test")
+	if err := s.OfferDraw(engine.White); err != nil {
+		t.Fatalf("OfferDraw(White): %v", err)
+	}
+	if err := s.DeclineDraw(engine.Black); err != nil {
+		t.Fatalf("DeclineDraw(Black): %v", err)
+	}
+
+	state := s.State()
+	if state.DrawOffered || state.Over() {
+		t.Errorf("State() after decline = %+v, want no pending offer and game still on", state)
+	}
+
+	m, _ := engine.ParseMove("e2e4")
+	if err := s.MakeMove(engine.White, m); err != nil {
+		t.Errorf("MakeMove after declined draw = %v, want nil", err)
+	}
+}
+
+func TestMakeMoveClearsDrawOffer(t *testing.T) {
+	s := newSession("test")
+	if err := s.OfferDraw(engine.White); err != nil {
+		t.Fatalf("OfferDraw(White): %v", err)
+	}
+
+	m, _ := engine.ParseMove("e2e4")
+	if err := s.MakeMove(engine.White, m); err != nil {
+		t.Fatalf("MakeMove(e2e4): %v", err)
+	}
+
+	if state := s.State(); state.DrawOffered {
+		t.Errorf("State().DrawOffered = true after a move, want false")
+	}
+}
+
 func TestCancelUnsubscribes(t *testing.T) {
 	s := newSession("test")
 	events, cancel := s.Subscribe()

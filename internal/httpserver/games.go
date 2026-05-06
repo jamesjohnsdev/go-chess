@@ -90,7 +90,8 @@ func registerGetGame(api huma.API, store *game.Store) {
 // doesn't manage hijacked connections, so this bypasses it. A client
 // authenticates as a color with ?token=<white_token|black_token> from
 // CreateGameOutput, then exchanges game.ClientMessage/game.Event JSON
-// frames for moves, chat, and state updates.
+// frames: moves, chat, resign, offer_draw, accept_draw, decline_draw, and
+// the resulting state updates.
 func registerGameSocket(router chi.Router, store *game.Store) {
 	router.Get("/games/{id}/ws", func(w http.ResponseWriter, r *http.Request) {
 		session, ok := store.Get(chi.URLParam(r, "id"))
@@ -130,6 +131,10 @@ func registerGameSocket(router chi.Router, store *game.Store) {
 				return
 			}
 
+			writeErr := func(err error) {
+				_ = wsjson.Write(ctx, conn, game.Event{Type: "error", Error: err.Error(), State: session.State()})
+			}
+
 			switch msg.Type {
 			case "move":
 				if msg.Move == nil {
@@ -137,14 +142,30 @@ func registerGameSocket(router chi.Router, store *game.Store) {
 				}
 				mv, err := msg.Move.ToMove()
 				if err != nil {
-					_ = wsjson.Write(ctx, conn, game.Event{Type: "error", Error: err.Error(), State: session.State()})
+					writeErr(err)
 					continue
 				}
 				if err := session.MakeMove(color, mv); err != nil {
-					_ = wsjson.Write(ctx, conn, game.Event{Type: "error", Error: err.Error(), State: session.State()})
+					writeErr(err)
 				}
 			case "chat":
 				session.AddChat(color.String(), msg.Text)
+			case "resign":
+				if err := session.Resign(color); err != nil {
+					writeErr(err)
+				}
+			case "offer_draw":
+				if err := session.OfferDraw(color); err != nil {
+					writeErr(err)
+				}
+			case "accept_draw":
+				if err := session.AcceptDraw(color); err != nil {
+					writeErr(err)
+				}
+			case "decline_draw":
+				if err := session.DeclineDraw(color); err != nil {
+					writeErr(err)
+				}
 			}
 		}
 	})

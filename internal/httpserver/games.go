@@ -14,9 +14,16 @@ import (
 )
 
 type CreateGameInput struct {
-	Body struct {
+	Body *struct {
 		Computer string `json:"computer,omitempty" enum:"white,black,none" default:"none" doc:"which side the computer plays; \"none\" (the default) for two human players"`
 	}
+}
+
+func (in *CreateGameInput) computer() string {
+	if in.Body == nil {
+		return ""
+	}
+	return in.Body.Computer
 }
 
 type CreateGameOutput struct {
@@ -36,7 +43,7 @@ func registerCreateGame(api huma.API, store *game.Store) {
 		Summary:     "Create a new live game",
 	}, func(ctx context.Context, input *CreateGameInput) (*CreateGameOutput, error) {
 		out := &CreateGameOutput{}
-		switch input.Body.Computer {
+		switch input.computer() {
 		case "white":
 			s := store.CreateVsComputer(engine.White)
 			out.Body.ID = s.ID
